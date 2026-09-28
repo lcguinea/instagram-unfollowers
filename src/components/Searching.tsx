@@ -3,6 +3,7 @@ import { assertUnreachable, getCurrentPageUnfollowers, getMaxPage, getUsersForDi
 import { State } from "../model/state";
 import { UserNode } from "../model/user";
 import { WHITELISTED_RESULTS_STORAGE_KEY } from "../constants/constants";
+import { buildUnfollowConfirmationMessage } from "../utils/unfollow-safety";
 
 
 export interface SearchingProps {
@@ -38,6 +39,9 @@ export const Searching = ({
     state.filter,
   );
   let currentLetter = "";
+  // Selecting and unfollowing only make sense on a finished, complete scan.
+  const actionsLocked = state.percentage < 100 || state.scanIncomplete === true;
+  const selectedIds = new Set(state.selectedResults.map(user => user.id));
 
   const onNewLetter = (firstLetter: string) => {
     currentLetter = firstLetter;
@@ -194,7 +198,7 @@ export const Searching = ({
             </p>
           </div>
 
-          {state.percentage === 100 && (
+          {state.percentage === 100 && !state.scanIncomplete && (
             <div className="sidebar-summary">
               <h4>Scan Summary</h4>
               <div className="summary-grid">
@@ -255,8 +259,16 @@ export const Searching = ({
         </div>
         <button
           className="unfollow"
+          disabled={actionsLocked}
           onClick={() => {
-            if (!confirm("Are you sure?")) {
+            if (actionsLocked) {
+              return;
+            }
+            if (state.selectedResults.length === 0) {
+              alert("Must select at least a single user to unfollow");
+              return;
+            }
+            if (!confirm(buildUnfollowConfirmationMessage(state.selectedResults))) {
               return;
             }
             //TODO TEMP until types are properly fixed
@@ -391,7 +403,8 @@ export const Searching = ({
                   <input
                     className="account-checkbox"
                     type="checkbox"
-                    checked={state.selectedResults.indexOf(user) !== -1}
+                    checked={selectedIds.has(user.id)}
+                    disabled={actionsLocked}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => toggleUser(e.currentTarget.checked, user)}
                   />
                 </div>

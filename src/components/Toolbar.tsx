@@ -37,7 +37,11 @@ export const Toolbar = ({
     <header className="app-header">
       {state.status === "scanning" && state.results.length === 0 && (
         <div className="scan-warning-banner" role="status">
-          <span>⚠️ Accounts will not appear until the scan finishes or nears completion.</span>
+          <span>
+            {state.scanIncomplete
+              ? "⚠️ Scan incomplete: no actionable results are shown. Go back and run the scan again."
+              : "⚠️ Accounts will not appear until the scan finishes or nears completion."}
+          </span>
         </div>
       )}
       {isActiveProcess && (

@@ -76,6 +76,7 @@ export const Unfollowing = (
               <div className="p-medium clr-red" key={entry.user.id}>
                 Failed to unfollow {entry.user.username} [{index + 1}/
                 {state.selectedResults.length}]
+                {entry.reason !== undefined && <>&nbsp;{entry.reason}</>}
               </div>
             ),
         )}

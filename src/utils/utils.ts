@@ -4,6 +4,7 @@ import { ScanningTab } from "../model/scanning-tab";
 import { ScanningFilter } from "../model/scanning-filter";
 import { UnfollowLogEntry } from "../model/unfollow-log-entry";
 import { UnfollowFilter } from "../model/unfollow-filter";
+import { getRawUserId, InstagramHttpError, normalizeInstagramId } from "./unfollow-safety";
 
 export async function copyListToClipboard(nonFollowersList: readonly UserNode[]): Promise<void> {
   const sortedList = [...nonFollowersList].sort((a, b) => (a.username > b.username ? 1 : -1));
@@ -73,8 +74,10 @@ export function getUsersForDisplay(
   filter: ScanningFilter,
 ): readonly UserNode[] {
   const users: UserNode[] = [];
+  const whitelistedIds = new Set(whitelistedResults.map(user => normalizeInstagramId(user.id)));
   for (const result of results) {
-    const isWhitelisted = whitelistedResults.find(user => user.id === result.id) !== undefined;
+    const resultId = normalizeInstagramId(result.id);
+    const isWhitelisted = resultId !== null && whitelistedIds.has(resultId);
     switch (currentTab) {
       case "non_whitelisted":
         if (isWhitelisted) {
@@ -207,14 +210,20 @@ export async function fetchFriendshipsPage(kind: FriendshipsListKind, maxId?: st
     headers: { 'X-IG-App-ID': INSTAGRAM_WEB_APP_ID },
   });
   if (!response.ok) {
-    throw new Error(`Instagram returned HTTP ${response.status} while fetching ${kind}`);
+    throw new InstagramHttpError(response.status, `Instagram returned HTTP ${response.status} while fetching ${kind}`);
   }
   return response.json() as Promise<FriendshipsPage>;
 }
 
-export function rawFriendshipUserToUserNode(raw: RawFriendshipUser, followsViewer: boolean): UserNode {
+// Returns null when the entry has no valid Instagram ID; callers must treat
+// that as an incomplete scan rather than guessing an identity.
+export function rawFriendshipUserToUserNode(raw: RawFriendshipUser, followsViewer: boolean): UserNode | null {
+  const id = getRawUserId(raw);
+  if (id === null) {
+    return null;
+  }
   return {
-    id: String(raw.pk_id ?? raw.pk),
+    id,
     username: raw.username,
     full_name: raw.full_name ?? '',
     profile_pic_url: raw.profile_pic_url,

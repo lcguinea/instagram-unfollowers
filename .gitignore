@@ -4,3 +4,6 @@ dist/
 .idea/
 .DS_Store
 bun.lockb
+
+# claude-orchestrator: memoria durable local
+.orchestrator/

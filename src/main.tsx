@@ -35,6 +35,15 @@ import { Toolbar } from "./components/Toolbar";
 import { Unfollowing } from "./components/Unfollowing";
 import { Timings } from "./model/timings";
 import { loadTimings, loadWhitelist, saveTimings, saveWhitelist } from "./utils/whitelist-manager";
+import {
+  classifyUnfollowResponse,
+  getBlockingStatusReason,
+  getRawUserId,
+  InstagramHttpError,
+  isWhitelistedId,
+  normalizeInstagramId,
+} from "./utils/unfollow-safety";
+import { UnfollowLogEntry } from "./model/unfollow-log-entry";
 
 const LOCAL_PREVIEW_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 const isLocalPreview = LOCAL_PREVIEW_HOSTS.has(location.hostname);
@@ -361,14 +370,15 @@ function App() {
     // Fetches every page of `kind` (following or followers), applying the
     // same pacing/pause/backoff behavior the original single-endpoint scan
     // used, and reports progress within [progressRangeStart, progressRangeEnd]
-    // of the overall percentage bar.
+    // of the overall percentage bar. `blockingReason` is set when Instagram
+    // answered 401/403/429, in which case no further requests must be made.
     const fetchList = async (
       kind: FriendshipsListKind,
       pageSafetyLimit: number,
       progressRangeStart: number,
       progressRangeEnd: number,
       onPageUsers: (pageUsers: readonly RawFriendshipUser[]) => void,
-    ): Promise<boolean> => {
+    ): Promise<{ readonly completed: boolean; readonly blockingReason: string | null }> => {
       let maxId: string | undefined;
       let pagesFetched = 0;
       let scrollCycle = 0;
@@ -381,10 +391,16 @@ function App() {
           page = await fetchFriendshipsPage(kind, maxId, timings.usersPerSearchCycle);
         } catch (e) {
           console.error(`Stopping ${kind} scan early:`, e);
-          return false;
+          const blockingReason = e instanceof InstagramHttpError ? getBlockingStatusReason(e.status) : null;
+          return { completed: false, blockingReason };
         }
 
-        const pageUsers = page.users ?? [];
+        // A 200 without a user list (e.g. `{"status":"fail"}`) is a failed page, not an empty one.
+        if (!Array.isArray(page.users)) {
+          console.error(`Stopping ${kind} scan early: Instagram returned a page without a user list.`, page);
+          return { completed: false, blockingReason: null };
+        }
+        const pageUsers = page.users;
         totalUsersFetched += pageUsers.length;
         onPageUsers(pageUsers);
 
@@ -399,15 +415,23 @@ function App() {
           };
         });
 
+        const paginationIncomplete =
+          (page.has_more === true && !page.next_max_id) ||
+          (page.has_more !== false && pageUsers.length === 0 && Boolean(page.next_max_id));
+        if (paginationIncomplete) {
+          console.error(`Stopping ${kind} scan early: Instagram returned inconsistent pagination.`, page);
+          return { completed: false, blockingReason: null };
+        }
+
         const hasMore = Boolean(page.next_max_id) && page.has_more !== false;
-        if (!hasMore || pageUsers.length === 0) {
+        if (!hasMore) {
           break;
         }
 
         pagesFetched += 1;
         if (pagesFetched >= pageSafetyLimit) {
           console.error(`Stopping ${kind} scan early: hit the safety cap of ${pageSafetyLimit} pages with ${totalUsersFetched} users fetched.`);
-          return false;
+          return { completed: false, blockingReason: null };
         }
         maxId = page.next_max_id;
 
@@ -451,7 +475,7 @@ function App() {
         };
       });
 
-      return true;
+      return { completed: true, blockingReason: null };
     };
 
     const scan = async () => {
@@ -459,10 +483,31 @@ function App() {
         return;
       }
 
+      // Ends the scan without actionable results: a partial following or
+      // followers list would show people who do follow you as non-followers.
+      const finishIncomplete = (message: string) => {
+        setState(prevState => {
+          if (prevState.status !== "scanning") {
+            return prevState;
+          }
+          return {
+            ...prevState,
+            percentage: 100,
+            results: [],
+            selectedResults: [],
+            scanIncomplete: true,
+          };
+        });
+        setToast({
+          show: true,
+          text: `Scan incomplete: ${message} No actionable results are shown. Please run the scan again later.`,
+        });
+      };
+
       // 1. Fetch all accounts you follow.
       // We push directly into followingUsers to avoid allocating new arrays on every page.
       const followingUsers: RawFriendshipUser[] = [];
-      const followingCompleted = await fetchList(
+      const following = await fetchList(
         "following",
         FOLLOWING_PAGE_SAFETY_LIMIT,
         0,
@@ -472,12 +517,10 @@ function App() {
         },
       );
 
-      // If following failed completely on the first attempt, don't waste network requests on followers.
-      if (!followingCompleted && followingUsers.length === 0) {
-        setToast({
-          show: true,
-          text: "Scan failed: could not load your following list from Instagram.",
-        });
+      // Without the complete following list results can't be trusted, so don't
+      // waste (or keep hitting Instagram with) requests for followers.
+      if (!following.completed) {
+        finishIncomplete(following.blockingReason ?? "could not load your full following list from Instagram.");
         return;
       }
 
@@ -485,23 +528,44 @@ function App() {
       // We only store IDs in a Set<string> and discard the rest of the follower objects
       // immediately to minimize memory usage.
       const followerIds = new Set<string>();
-      const followersCompleted = await fetchList(
+      let invalidIdCount = 0;
+      const followers = await fetchList(
         "followers",
         FOLLOWERS_PAGE_SAFETY_LIMIT,
         45,
         95,
         pageUsers => {
           for (const user of pageUsers) {
-            followerIds.add(String(user.pk_id ?? user.pk));
+            const id = getRawUserId(user);
+            if (id === null) {
+              invalidIdCount += 1;
+            } else {
+              followerIds.add(id);
+            }
           }
         },
       );
 
-      const allCompleted = followingCompleted && followersCompleted;
+      if (!followers.completed) {
+        finishIncomplete(followers.blockingReason ?? "could not load your full followers list from Instagram.");
+        return;
+      }
 
-      const results: UserNode[] = followingUsers.map(user =>
-        rawFriendshipUserToUserNode(user, followerIds.has(String(user.pk_id ?? user.pk))),
-      );
+      const results: UserNode[] = [];
+      for (const user of followingUsers) {
+        const id = getRawUserId(user);
+        const node = id === null ? null : rawFriendshipUserToUserNode(user, followerIds.has(id));
+        if (node === null) {
+          invalidIdCount += 1;
+        } else {
+          results.push(node);
+        }
+      }
+
+      if (invalidIdCount > 0) {
+        finishIncomplete(`${invalidIdCount} account(s) came back from Instagram without a valid ID.`);
+        return;
+      }
 
       setState(prevState => {
         if (prevState.status !== "scanning") {
@@ -509,23 +573,14 @@ function App() {
         }
         return {
           ...prevState,
-          percentage: allCompleted ? 100 : prevState.percentage,
+          percentage: 100,
           results,
         };
       });
 
-      let toastMessage = "Scanning completed!";
-      if (!followingCompleted && !followersCompleted) {
-        toastMessage = `Partial scan: loaded ${followingUsers.length} accounts, but scan was interrupted.`;
-      } else if (!followersCompleted) {
-        toastMessage = "Warning: Followers list was interrupted. Accounts that follow you may appear as non-followers.";
-      } else if (!followingCompleted) {
-        toastMessage = `Partial scan: loaded ${followingUsers.length} followed accounts before scan stopped.`;
-      }
-
       setToast({
         show: true,
-        text: toastMessage,
+        text: "Scanning completed!",
       });
     };
     scan();
@@ -541,7 +596,17 @@ function App() {
 
       const csrftoken = getCookie("csrftoken");
       if (csrftoken === null) {
-        throw new Error("csrftoken cookie is null");
+        setState(prevState => {
+          if (prevState.status !== "unfollowing") {
+            return prevState;
+          }
+          return { ...prevState, percentage: 100 };
+        });
+        setToast({
+          show: true,
+          text: "Unfollow not started: Instagram's csrftoken cookie was not found. Make sure you are logged in on instagram.com and reload the page.",
+        });
+        return;
       }
 
       let counter = 0;
@@ -550,50 +615,67 @@ function App() {
         // Fix: Changed from Math.floor to Math.round to ensure progress reaches 100%
         // Math.floor would leave progress at 99% when near completion
         const percentage = Math.round((counter / state.selectedResults.length) * 100);
-        try {
-          await fetch(unfollowUserUrlGenerator(user.id), {
-            headers: {
-              "content-type": "application/x-www-form-urlencoded",
-              "x-csrftoken": csrftoken,
-            },
-            method: "POST",
-            mode: "cors",
-            credentials: "include",
-          });
-          setState(prevState => {
-            if (prevState.status !== "unfollowing") {
-              return prevState;
+        const userId = normalizeInstagramId(user.id);
+        let entry: UnfollowLogEntry;
+        let requestSent = false;
+        let stopReason: string | null = null;
+        if (userId === null) {
+          entry = { user, unfollowedSuccessfully: false, reason: "Skipped: this account has no valid Instagram ID." };
+        } else if (isWhitelistedId(userId, loadWhitelist())) {
+          // Re-read the whitelist right before each unfollow: it may have changed since the scan.
+          entry = { user, unfollowedSuccessfully: false, reason: "Skipped: this account is whitelisted." };
+        } else {
+          requestSent = true;
+          try {
+            const response = await fetch(unfollowUserUrlGenerator(userId), {
+              headers: {
+                "content-type": "application/x-www-form-urlencoded",
+                "x-csrftoken": csrftoken,
+              },
+              method: "POST",
+              mode: "cors",
+              credentials: "include",
+            });
+            let body: unknown = null;
+            try {
+              body = await response.json();
+            } catch {
+              // Not JSON (e.g. a login page): can't be a confirmed unfollow.
             }
-            return {
-              ...prevState,
-              percentage,
-              unfollowLog: [
-                ...prevState.unfollowLog,
-                {
-                  user,
-                  unfollowedSuccessfully: true,
-                },
-              ],
+            const outcome = classifyUnfollowResponse(response.status, body);
+            entry = {
+              user,
+              unfollowedSuccessfully: outcome.kind === "success",
+              reason: outcome.kind === "success" ? undefined : outcome.reason,
             };
-          });
-        } catch (e) {
-          console.error(e);
-          setState(prevState => {
-            if (prevState.status !== "unfollowing") {
-              return prevState;
+            if (outcome.kind === "stop") {
+              stopReason = outcome.reason;
             }
-            return {
-              ...prevState,
-              percentage,
-              unfollowLog: [
-                ...prevState.unfollowLog,
-                {
-                  user,
-                  unfollowedSuccessfully: false,
-                },
-              ],
-            };
+          } catch (e) {
+            console.error(e);
+            entry = { user, unfollowedSuccessfully: false, reason: "Network error: the request did not complete." };
+          }
+        }
+        setState(prevState => {
+          if (prevState.status !== "unfollowing") {
+            return prevState;
+          }
+          return {
+            ...prevState,
+            percentage: stopReason === null ? percentage : 100,
+            unfollowLog: [...prevState.unfollowLog, entry],
+          };
+        });
+        if (stopReason !== null) {
+          setToast({
+            show: true,
+            text: `Unfollow stopped, no more requests will be sent. ${stopReason}`,
           });
+          break;
+        }
+        // No request was made for skipped accounts, so there's nothing to pace.
+        if (!requestSent) {
+          continue;
         }
         // If unfollowing the last user in the list, no reason to wait.
         if (user === state.selectedResults[state.selectedResults.length - 1]) {

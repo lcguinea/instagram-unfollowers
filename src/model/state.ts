@@ -14,6 +14,8 @@ type ScanningState = {
   readonly whitelistedResults: readonly UserNode[];
   readonly selectedResults: readonly UserNode[];
   readonly filter: ScanningFilter;
+  // Set when following/followers could not be fully loaded: results are not actionable.
+  readonly scanIncomplete?: boolean;
 };
 
 type UnfollowingState = {
