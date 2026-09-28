@@ -1,6 +1,7 @@
 import { UserNode } from "./user";
 import { ScanningTab } from "./scanning-tab";
 import { ScanningFilter } from "./scanning-filter";
+import { ResultsView } from "./results-view";
 import { UnfollowLogEntry } from "./unfollow-log-entry";
 import { UnfollowFilter } from "./unfollow-filter";
 import { LatestComparison } from "../utils/snapshot-history";
@@ -29,6 +30,8 @@ type ScanningState = {
   // utils/snapshot-history.ts): who stopped following you since the
   // previous complete snapshot, as opposed to who doesn't follow you now.
   readonly unfollowHistory?: LatestComparison;
+  // Which results view is shown; undefined = "not_following_you".
+  readonly resultsView?: ResultsView;
 };
 
 type UnfollowingState = {

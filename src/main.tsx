@@ -234,6 +234,9 @@ function App() {
       results: [],
       selectedResults: [],
       whitelistedResults,
+      // Read-only: until this scan completes (it may not), the last two
+      // complete snapshots are still the ones already stored.
+      unfollowHistory: getLatestComparison(loadSnapshotHistory(), getCookie("ds_user_id")),
       filter: {
         showNonFollowers: true,
         showFollowers: false,

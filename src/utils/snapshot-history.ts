@@ -118,6 +118,22 @@ export type LatestComparison =
   | { readonly kind: "baseline"; readonly currentCompletedAt: number }
   | {
     readonly kind: "compared";
+    readonly previousSnapshotId: string;
+    readonly currentSnapshotId: string;
+    readonly previousCompletedAt: number;
+    readonly currentCompletedAt: number;
+    readonly events: readonly UnfollowEvent[];
+  };
+
+// What the "Recent Unfollowers" view shows: only the events of the pair
+// formed by the account's penultimate and latest complete snapshots.
+export type RecentUnfollowers =
+  | { readonly kind: "unavailable" }
+  // Fewer than two complete snapshots; baselineCompletedAt is the only one, if any.
+  | { readonly kind: "needs_another_scan"; readonly baselineCompletedAt: number | null }
+  | { readonly kind: "no_unfollowers"; readonly previousCompletedAt: number; readonly currentCompletedAt: number }
+  | {
+    readonly kind: "unfollowers";
     readonly previousCompletedAt: number;
     readonly currentCompletedAt: number;
     readonly events: readonly UnfollowEvent[];
@@ -486,10 +502,38 @@ export function getLatestComparison(loaded: HistoryLoadResult, ownerId: unknown)
   if (latest.previousSnapshotId === null || latest.previousCompletedAt === null) {
     return { kind: "baseline", currentCompletedAt: latest.completedAt };
   }
+  const previousSnapshotId = latest.previousSnapshotId;
   return {
     kind: "compared",
+    previousSnapshotId,
+    currentSnapshotId: latest.id,
     previousCompletedAt: latest.previousCompletedAt,
     currentCompletedAt: latest.completedAt,
-    events: loaded.history.events.filter(event => event.currentSnapshotId === latest.id),
+    events: loaded.history.events.filter(
+      event => event.previousSnapshotId === previousSnapshotId && event.currentSnapshotId === latest.id,
+    ),
   };
+}
+
+/**
+ * Read-only view of getLatestComparison for the "Recent Unfollowers" filter.
+ * Its events are the stored ones as detected, never recomputed here; older
+ * events stay stored but aren't part of the latest pair.
+ */
+export function getRecentUnfollowers(comparison: LatestComparison | undefined): RecentUnfollowers {
+  if (comparison === undefined || comparison.kind === "none") {
+    return { kind: "needs_another_scan", baselineCompletedAt: null };
+  }
+  switch (comparison.kind) {
+    case "unavailable":
+      return { kind: "unavailable" };
+    case "baseline":
+      return { kind: "needs_another_scan", baselineCompletedAt: comparison.currentCompletedAt };
+    case "compared": {
+      const { previousCompletedAt, currentCompletedAt, events } = comparison;
+      return events.length === 0
+        ? { kind: "no_unfollowers", previousCompletedAt, currentCompletedAt }
+        : { kind: "unfollowers", previousCompletedAt, currentCompletedAt, events };
+    }
+  }
 }
