@@ -45,6 +45,7 @@ import {
 } from "./utils/unfollow-safety";
 import { UnfollowLogEntry } from "./model/unfollow-log-entry";
 import { loadScanSnapshot, saveScanSnapshot } from "./utils/scan-snapshot";
+import { getLatestComparison, HistoryUserInput, loadSnapshotHistory, recordCompleteScan } from "./utils/snapshot-history";
 
 const LOCAL_PREVIEW_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 const isLocalPreview = LOCAL_PREVIEW_HOSTS.has(location.hostname);
@@ -132,6 +133,8 @@ function _buildInitialState(): State {
     },
     isRestoredSnapshot: true,
     restoredAt: restored.completedAt,
+    // Read-only: restoring never records a snapshot in the history.
+    unfollowHistory: getLatestComparison(loadSnapshotHistory(), getCookie("ds_user_id")),
   };
 }
 
@@ -537,6 +540,9 @@ function App() {
         });
       };
 
+      // Account the lists are fetched for (see friendshipsUrlGenerator).
+      const scanOwnerId = getCookie("ds_user_id");
+
       // 1. Fetch all accounts you follow.
       // We push directly into followingUsers to avoid allocating new arrays on every page.
       const followingUsers: RawFriendshipUser[] = [];
@@ -558,9 +564,11 @@ function App() {
       }
 
       // 2. Fetch follower IDs only.
-      // We only store IDs in a Set<string> and discard the rest of the follower objects
-      // immediately to minimize memory usage.
+      // We only store IDs in a Set<string> (plus id/username for the snapshot
+      // history) and discard the rest of the follower objects immediately to
+      // minimize memory usage.
       const followerIds = new Set<string>();
+      const followerUsers: HistoryUserInput[] = [];
       let invalidIdCount = 0;
       const followers = await fetchList(
         "followers",
@@ -574,6 +582,7 @@ function App() {
               invalidIdCount += 1;
             } else {
               followerIds.add(id);
+              followerUsers.push({ id, username: user.username });
             }
           }
         },
@@ -603,6 +612,19 @@ function App() {
       // Scan confirmed complete and valid: safe to persist as the latest
       // snapshot for restoration on the next app load.
       saveScanSnapshot(results);
+      // Same confirmed-complete path: add it to the snapshot history and
+      // detect unfollows against the previous complete snapshot.
+      // If the session changed mid-scan the lists can't be attributed to one
+      // account: a null owner makes the history reject the scan.
+      const ownerId = getCookie("ds_user_id") === scanOwnerId ? scanOwnerId : null;
+      recordCompleteScan({
+        outcome: "complete",
+        completedAt: Date.now(),
+        ownerId,
+        followers: followerUsers,
+        following: results,
+      });
+      const unfollowHistory = getLatestComparison(loadSnapshotHistory(), ownerId);
 
       setState(prevState => {
         if (prevState.status !== "scanning") {
@@ -613,6 +635,7 @@ function App() {
           percentage: 100,
           results,
           isRestoredSnapshot: false,
+          unfollowHistory,
         };
       });
 

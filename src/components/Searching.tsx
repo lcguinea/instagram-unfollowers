@@ -45,6 +45,7 @@ export const Searching = ({
   // state may have changed since that scan completed.
   const actionsLocked = state.percentage < 100 || state.scanIncomplete === true || state.isRestoredSnapshot === true;
   const selectedIds = new Set(state.selectedResults.map(user => user.id));
+  const unfollowHistory = state.unfollowHistory;
 
   const onNewLetter = (firstLetter: string) => {
     currentLetter = firstLetter;
@@ -224,6 +225,46 @@ export const Searching = ({
                   <strong>{state.results.filter(u => u.is_private).length}</strong>
                 </div>
               </div>
+            </div>
+          )}
+          {unfollowHistory !== undefined && unfollowHistory.kind !== "none" && (
+            <div className="sidebar-summary">
+              <h4>Unfollowed you since previous snapshot</h4>
+              <p className="fs-medium">
+                Non-Followers are accounts that don&apos;t follow you now. This lists who stopped following you
+                between two complete scans.
+              </p>
+              {unfollowHistory.kind === "unavailable" && (
+                <p className="fs-medium">Saved scan history can&apos;t be read, so unfollows aren&apos;t tracked. It was left untouched.</p>
+              )}
+              {unfollowHistory.kind === "baseline" && (
+                <p className="fs-medium">
+                  Scan from {new Date(unfollowHistory.currentCompletedAt).toLocaleString()} saved as the baseline.
+                  Unfollows will be detected from the next complete scan.
+                </p>
+              )}
+              {unfollowHistory.kind === "compared" && (
+                <>
+                  <p className="fs-medium">
+                    Between {new Date(unfollowHistory.previousCompletedAt).toLocaleString()} and{" "}
+                    {new Date(unfollowHistory.currentCompletedAt).toLocaleString()}: {unfollowHistory.events.length}
+                  </p>
+                  <div className="summary-grid">
+                    {unfollowHistory.events.map(event => (
+                      <div className="summary-item" key={event.id}>
+                        <strong>@{event.username ?? event.userId}</strong>
+                        <span>
+                          {event.youFollowThem === null
+                            ? "Unknown if you follow them"
+                            : event.youFollowThem
+                              ? "You still follow them"
+                              : "You don't follow them"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           )}
           <div className="sidebar-footer-controls">

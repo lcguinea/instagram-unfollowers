@@ -19,6 +19,8 @@ export const WHITELISTED_RESULTS_STORAGE_KEY = "iu_whitelisted-results";
 export const TIMINGS_STORAGE_KEY = "iu_timings";
 // Single-slot storage for the last COMPLETE scan (see utils/scan-snapshot.ts).
 export const SCAN_SNAPSHOT_STORAGE_KEY = "iu_scan_snapshot";
+// History of COMPLETE scans and detected unfollows (see utils/snapshot-history.ts).
+export const SNAPSHOT_HISTORY_STORAGE_KEY = "iu_snapshot_history";
 
 //TIMINGS CONSTANTS
 export const DEFAULT_TIME_BETWEEN_SEARCH_CYCLES = 1000;

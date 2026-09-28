@@ -3,6 +3,7 @@ import { ScanningTab } from "./scanning-tab";
 import { ScanningFilter } from "./scanning-filter";
 import { UnfollowLogEntry } from "./unfollow-log-entry";
 import { UnfollowFilter } from "./unfollow-filter";
+import { LatestComparison } from "../utils/snapshot-history";
 
 type ScanningState = {
   readonly status: 'scanning';
@@ -24,6 +25,10 @@ type ScanningState = {
   // Timestamp (ms) the restored snapshot's scan originally completed at.
   // Only meaningful when isRestoredSnapshot is true.
   readonly restoredAt?: number;
+  // Latest comparison from the complete-snapshot history (see
+  // utils/snapshot-history.ts): who stopped following you since the
+  // previous complete snapshot, as opposed to who doesn't follow you now.
+  readonly unfollowHistory?: LatestComparison;
 };
 
 type UnfollowingState = {
