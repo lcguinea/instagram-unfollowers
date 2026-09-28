@@ -17,6 +17,8 @@ export const FOLLOWING_PAGE_SAFETY_LIMIT = 60;
 export const FOLLOWERS_PAGE_SAFETY_LIMIT = 250;
 export const WHITELISTED_RESULTS_STORAGE_KEY = "iu_whitelisted-results";
 export const TIMINGS_STORAGE_KEY = "iu_timings";
+// Single-slot storage for the last COMPLETE scan (see utils/scan-snapshot.ts).
+export const SCAN_SNAPSHOT_STORAGE_KEY = "iu_scan_snapshot";
 
 //TIMINGS CONSTANTS
 export const DEFAULT_TIME_BETWEEN_SEARCH_CYCLES = 1000;

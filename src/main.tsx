@@ -44,6 +44,7 @@ import {
   normalizeInstagramId,
 } from "./utils/unfollow-safety";
 import { UnfollowLogEntry } from "./model/unfollow-log-entry";
+import { loadScanSnapshot, saveScanSnapshot } from "./utils/scan-snapshot";
 
 const LOCAL_PREVIEW_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 const isLocalPreview = LOCAL_PREVIEW_HOSTS.has(location.hostname);
@@ -104,6 +105,36 @@ function pauseScan() {
 }
 
 
+// On app start, restores the last COMPLETE scan persisted to localStorage
+// (see utils/scan-snapshot.ts), shown clearly as saved data rather than a
+// fresh scan and never actionable (see actionsLocked in Searching.tsx).
+// Falls back to the plain "initial" state when there's no valid snapshot.
+function _buildInitialState(): State {
+  const restored = loadScanSnapshot();
+  if (!restored.found) {
+    return { status: "initial" };
+  }
+  return {
+    status: "scanning",
+    page: 1,
+    searchTerm: "",
+    currentTab: "non_whitelisted",
+    percentage: 100,
+    results: restored.users,
+    selectedResults: [],
+    whitelistedResults: loadWhitelist(),
+    filter: {
+      showNonFollowers: true,
+      showFollowers: false,
+      showVerified: true,
+      showPrivate: true,
+      showWithOutProfilePicture: true,
+    },
+    isRestoredSnapshot: true,
+    restoredAt: restored.completedAt,
+  };
+}
+
 function App() {
   const [state, setState] = useState<State>({
     ...(
@@ -125,7 +156,9 @@ function App() {
             showWithOutProfilePicture: true,
           },
         } as State
-        : { status: "initial" as const }
+        : isLocalPreview
+          ? { status: "initial" as const }
+          : _buildInitialState()
     ),
   });
 
@@ -567,6 +600,10 @@ function App() {
         return;
       }
 
+      // Scan confirmed complete and valid: safe to persist as the latest
+      // snapshot for restoration on the next app load.
+      saveScanSnapshot(results);
+
       setState(prevState => {
         if (prevState.status !== "scanning") {
           return prevState;
@@ -575,6 +612,7 @@ function App() {
           ...prevState,
           percentage: 100,
           results,
+          isRestoredSnapshot: false,
         };
       });
 

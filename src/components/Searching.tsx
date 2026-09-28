@@ -39,8 +39,11 @@ export const Searching = ({
     state.filter,
   );
   let currentLetter = "";
-  // Selecting and unfollowing only make sense on a finished, complete scan.
-  const actionsLocked = state.percentage < 100 || state.scanIncomplete === true;
+  // Selecting and unfollowing only make sense on a finished, complete scan
+  // that ran in this session. Restored results (isRestoredSnapshot) are
+  // shown but must never be actionable, since the whitelist or account
+  // state may have changed since that scan completed.
+  const actionsLocked = state.percentage < 100 || state.scanIncomplete === true || state.isRestoredSnapshot === true;
   const selectedIds = new Set(state.selectedResults.map(user => user.id));
 
   const onNewLetter = (firstLetter: string) => {
@@ -92,6 +95,12 @@ export const Searching = ({
             <span>Scanner</span>
             <strong>{state.percentage}%</strong>
           </div>
+          {state.isRestoredSnapshot === true && (
+            <div className="saved-data-banner" role="status">
+              Showing saved data from {new Date(state.restoredAt ?? 0).toLocaleString()}. Run a new scan to refresh
+              and to unlock unfollow actions.
+            </div>
+          )}
           <menu className="sidebar-filters-grid">
             <p>Filter</p>
             <label className="badge m-small">

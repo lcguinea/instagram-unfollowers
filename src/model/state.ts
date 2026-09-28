@@ -16,6 +16,14 @@ type ScanningState = {
   readonly filter: ScanningFilter;
   // Set when following/followers could not be fully loaded: results are not actionable.
   readonly scanIncomplete?: boolean;
+  // Set when these results come from a previously persisted complete scan
+  // (see utils/scan-snapshot.ts), rather than one that finished in this
+  // session. Restored results must never be actionable (see actionsLocked in
+  // Searching.tsx) even though percentage is 100 and scanIncomplete isn't set.
+  readonly isRestoredSnapshot?: boolean;
+  // Timestamp (ms) the restored snapshot's scan originally completed at.
+  // Only meaningful when isRestoredSnapshot is true.
+  readonly restoredAt?: number;
 };
 
 type UnfollowingState = {
