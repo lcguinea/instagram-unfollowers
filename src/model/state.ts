@@ -30,6 +30,11 @@ type ScanningState = {
   // utils/snapshot-history.ts): who stopped following you since the
   // previous complete snapshot, as opposed to who doesn't follow you now.
   readonly unfollowHistory?: LatestComparison;
+  // Outcome of persisting a scan that just completed (last scan + history).
+  // Only set on the confirmed-complete path, after the writes were checked.
+  readonly persistenceNotice?:
+    | { readonly kind: "saved"; readonly savedAt: number }
+    | { readonly kind: "failed" };
   // Which results view is shown; undefined = "not_following_you".
   readonly resultsView?: ResultsView;
 };

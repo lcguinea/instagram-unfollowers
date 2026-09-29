@@ -53,9 +53,21 @@ export function buildScanSnapshot(results: readonly UserNode[]): ScanSnapshotDat
  * overwriting any previous one. Must only be called from a confirmed
  * complete-scan code path.
  */
-export function saveScanSnapshot(results: readonly UserNode[]): void {
-  const snapshot = buildScanSnapshot(results);
-  localStorage.setItem(SCAN_SNAPSHOT_STORAGE_KEY, JSON.stringify(snapshot));
+export function saveScanSnapshot(
+  results: readonly UserNode[],
+): { readonly ok: true; readonly completedAt: number } | { readonly ok: false } {
+  try {
+    const snapshot = buildScanSnapshot(results);
+    const serialized = JSON.stringify(snapshot);
+    localStorage.setItem(SCAN_SNAPSHOT_STORAGE_KEY, serialized);
+    // Confirm it really landed before reporting success.
+    if (localStorage.getItem(SCAN_SNAPSHOT_STORAGE_KEY) !== serialized) {
+      return { ok: false };
+    }
+    return { ok: true, completedAt: snapshot.completedAt };
+  } catch {
+    return { ok: false };
+  }
 }
 
 function isRecordOfUsers(value: unknown): value is Readonly<Record<string, UserNode>> {

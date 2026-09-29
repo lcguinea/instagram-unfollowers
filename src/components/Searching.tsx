@@ -163,6 +163,17 @@ export const Searching = ({
               and to unlock unfollow actions.
             </div>
           )}
+          {state.persistenceNotice?.kind === "saved" && (
+            <div className="saved-data-banner" role="status">
+              Scan saved on this device: {new Date(state.persistenceNotice.savedAt).toLocaleString()}
+            </div>
+          )}
+          {state.persistenceNotice?.kind === "failed" && (
+            <div className="saved-data-banner" role="alert">
+              Scan NOT saved: this browser refused the write (storage full or blocked). The next load will not have
+              this scan.
+            </div>
+          )}
           {!showingRecentUnfollowers && (
             <>
               <menu className="sidebar-filters-grid">

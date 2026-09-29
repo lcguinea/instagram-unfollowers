@@ -614,19 +614,23 @@ function App() {
 
       // Scan confirmed complete and valid: safe to persist as the latest
       // snapshot for restoration on the next app load.
-      saveScanSnapshot(results);
+      const snapshotSaved = saveScanSnapshot(results);
       // Same confirmed-complete path: add it to the snapshot history and
       // detect unfollows against the previous complete snapshot.
       // If the session changed mid-scan the lists can't be attributed to one
       // account: a null owner makes the history reject the scan.
       const ownerId = getCookie("ds_user_id") === scanOwnerId ? scanOwnerId : null;
-      recordCompleteScan({
+      const recorded = recordCompleteScan({
         outcome: "complete",
         completedAt: Date.now(),
         ownerId,
         followers: followerUsers,
         following: results,
       });
+      const historyStored =
+        recorded.outcome === "baseline" || recorded.outcome === "appended" || recorded.outcome === "duplicate";
+      const persistenceNotice: { readonly kind: "saved"; readonly savedAt: number } | { readonly kind: "failed" } =
+        snapshotSaved.ok && historyStored ? { kind: "saved", savedAt: snapshotSaved.completedAt } : { kind: "failed" };
       const unfollowHistory = getLatestComparison(loadSnapshotHistory(), ownerId);
 
       setState(prevState => {
@@ -639,6 +643,7 @@ function App() {
           results,
           isRestoredSnapshot: false,
           unfollowHistory,
+          persistenceNotice,
         };
       });
 
